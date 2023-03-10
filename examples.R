@@ -1,4 +1,4 @@
-
+library(dplyr)
 
 
 ## Changing cohort size
@@ -57,11 +57,7 @@ lambda_df <-
 ggplot(lambda_df, aes(time_step, lambda, colour = clipped_cohort)) +
   geom_point()
 
-
-
-
-
-## Changing cohort size
+## Changing encounter rate
 lambda_low_df <-
   cohort_df <- createCohort(cohort_size = 1000000L) |>
   fisherySim(encounter_rate = .3) |>
