@@ -59,7 +59,7 @@ ggplot(lambda_df, aes(time_step, lambda, colour = clipped_cohort)) +
 
 ## Changing encounter rate
 lambda_low_df <-
-  cohort_df <- createCohort(cohort_size = 1000000L) |>
+  cohort_df <- createCohort(cohort_size = 100000L) |>
   fisherySim(encounter_rate = .3) |>
   mutate(time_step = row_number(),
          clipped_cohort = sum(is_clipped == TRUE),
@@ -74,7 +74,7 @@ lambda_low_df <-
   mutate(time_step = row_number())
 
 lambda_med_df <-
-  cohort_df <- createCohort(cohort_size = 1000000L) |>
+  cohort_df <- createCohort(cohort_size = 100000L) |>
   fisherySim(encounter_rate = .5) |>
   mutate(time_step = row_number(),
          clipped_cohort = sum(is_clipped == TRUE),
@@ -90,7 +90,7 @@ lambda_med_df <-
 
 
 lambda_high_df <-
-  cohort_df <- createCohort(cohort_size = 1000000L) |>
+  cohort_df <- createCohort(cohort_size = 100000L) |>
   fisherySim(encounter_rate = .7) |>
   mutate(time_step = row_number(),
          clipped_cohort = sum(is_clipped == TRUE),

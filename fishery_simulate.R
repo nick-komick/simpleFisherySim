@@ -7,87 +7,30 @@ DropOff <- "DROP-OFF"
 Released <- "RELEASED"
 Kept <- "KEPT"
 
-
-mfaLambda <- function(abundance, pre_lambda, release_mort_rate, dropoff_mort_rate, fishery_summary, mid_lambda = FALSE) {
-  if (mid_lambda) {
-    fishery_summary <-
-      fishery_summary |>
-      mutate(events = events / 2,
-             mortality= mortality / 2)
-  }
-
-  catch_df <-
-    fishery_summary |>
-    filter(outcome %in% c(Kept, Released)) |>
-    group_by(is_clipped) |>
-    summarize(encounters = sum(events) * (1 + dropoff_mort_rate), .groups = "drop")
-
-  marked_encounters <-
-    catch_df |>
-    filter(is_clipped) |>
-    pull(encounters)
-
-  mortality_rate_df <-
-    fishery_summary |>
-    filter(outcome %in% c(Kept, Released)) |>
-    group_by(outcome, is_clipped) |>
-    summarize(catch = sum(events), .groups="drop") |>
-    mutate(drop_off_mortality = catch * dropoff_mort_rate,
-           catch_mortality = if_else(outcome == Released, catch*release_mort_rate, as.double(catch)),
-           mortality = drop_off_mortality + catch_mortality) |>
-    group_by(is_clipped) |>
-    summarize(mortality = sum(mortality), .groups="drop") |>
-    inner_join(catch_df, by=c("is_clipped")) |>
-    mutate(mortality_rate = mortality/encounters)
-
-  marked_mort_rate <-
-    mortality_rate_df |>
-    filter(is_clipped) |>
-    pull(mortality_rate)
-
-  #marked_mort_rate <- 1 - exp(-1 * marked_mort_rate)
-
-  unmarked_mort_rate <-
-    mortality_rate_df |>
-    filter(is_clipped == FALSE) |>
-    pull(mortality_rate)
-
-  #unmarked_mort_rate <- 1 - exp(-1 * unmarked_mort_rate)
-
-  marked_cohort_catch <-
-    fishery_summary |>
-    filter(is_clipped, is_cohort, outcome %in% c(Released,Kept)) |>
-    pull(events) |>
-    sum()
-
-
-  abundance_marked <- abundance /(pre_lambda + 1)
-
-  mid_lambda <- (abundance_marked * pre_lambda - pre_lambda * (marked_cohort_catch * 1.05) * unmarked_mort_rate)/
-    (abundance_marked - (marked_cohort_catch * 1.05) * marked_mort_rate)
-
-  return(mid_lambda)
-}
-
 #' Create Cohort Data Frame
 #'
 #' Create a data frame of random fish based on the
 #' cohort size and the adipose clip rate
 #'
 #' @param adclip_rate Adipose clip rate of the cohort (related to lambda)
+#' @param pnl Proportion not legal size
 #' @param cohort_size Size of the cohort
 #'
 #' @return A data frame with `cohort_size` rows
 #' @export
 #'
 createCohort <- function(adclip_rate = 0.5,
+                         pnl = 0.2,
                          cohort_size = 10000L) {
   cohort_df <-
     tibble(fish_number = seq_len(cohort_size),
            adclip_event = runif(cohort_size),
+           legal_event = runif(cohort_size),
            mortality = FALSE) |>
-    mutate(is_clipped = adclip_event <= adclip_rate) |>
-    select(-adclip_event)
+    mutate(is_clipped = adclip_event <= adclip_rate,
+           is_legal = legal_event > pnl) |>
+    select(-adclip_event,
+           -legal_event)
 
   return(cohort_df)
 }
@@ -99,13 +42,14 @@ createCohort <- function(adclip_rate = 0.5,
 #' fish in the cohort.
 #'
 #' @param cohort_df Cohort data frame
-#' @param fish_event A random number to try as first fish
+#' @param potential_fish A random number to try as first fish
 #'
 #' @return Fish/row number of a fish that is encountered in a fishery
 #'
 selectFish <- function(cohort_df, potential_fish) {
   find <- 1
   fish_number <- potential_fish
+
 
   while(cohort_df$mortality[fish_number] == TRUE) {
     fish_number <- as.integer(runif(1, min = 1, max = nrow(cohort_df)))
@@ -138,12 +82,13 @@ sequencialFisherySim <- function(cohort_df,
                                  unclipped_release_rate = .9,
                                  clipped_release_rate = .1,
                                  drop_mort_rate = 1.0,
-                                 release_mort_rate = 0.15,
-                                 fishery_adclip_rate = 0.6) {
+                                 legal_release_mort_rate = 0.15,
+                                 nonlegal_release_mort_rate = 0.15,
+                                 fishery_adclip_rate = 0.6,
+                                 fishery_pnl = 0.2) {
 
-  event_seq <- seq_len(fishery_catch * 2)
+  event_seq <- seq_len(fishery_catch * 10)
   event_len <- length(event_seq)
-
 
   total_kept_catch <- 0L
   outcomes <- rep(NA_character_, event_len)
@@ -151,25 +96,29 @@ sequencialFisherySim <- function(cohort_df,
   fish_numbers <- rep(NA_integer_, event_len)
 
   potential_fish <- as.integer(runif(event_len, min = 1, max = nrow(cohort_df)))
-  encouter_event <- runif(event_len)
+  encounter_event <- runif(event_len)
   drop_event <- runif(event_len)
   rel_event <- runif(event_len)
   mort_event <- runif(event_len)
   clip_event <- runif(event_len)
+  legal_event <- runif(event_len)
   is_clipped <- rep(NA, event_len)
+  is_legal <- rep(NA, event_len)
 
   for(event_id in event_seq) {
     if(total_kept_catch  >= fishery_catch) {
       break
     }
 
-    if(encouter_event[event_id] <= encounter_rate) {
+    if(encounter_event[event_id] <= encounter_rate) {
       #Encountered fish is from the provided cohort
       cohort_fish_number <- selectFish(cohort_df,
                                        potential_fish[event_id])
 
+      #cohort_fish_number <- sample(which(cohort_df$mortality == FALSE), 1)
+
       if(cohort_fish_number > nrow(cohort_df)) {
-        stop()
+        stop("Bad fish number")
       }
 
     } else {
@@ -184,10 +133,18 @@ sequencialFisherySim <- function(cohort_df,
     if(!is.na(cohort_fish_number)) {
       #If the fish was from our model cohort, use the fish adclip status
       is_clipped[event_id] <- cohort_df$is_clipped[cohort_fish_number]
+
+      #If the fish was from our model cohort, use the fish legal status
+      is_legal[event_id] <- cohort_df$is_legal[cohort_fish_number]
     } else {
       #If the fish was NOT from our model cohort, use randomly assign clip
       # based on the default fishery adclip rate
       is_clipped[event_id]<- clip_event[event_id] <= fishery_adclip_rate
+
+
+      #If the fish was NOT from our model cohort, use randomly assign
+      # vulnerability status based on the default fishery vulnerability rate
+      is_legal[event_id]<- legal_event[event_id] >= fishery_pnl
     }
 
 
@@ -204,20 +161,13 @@ sequencialFisherySim <- function(cohort_df,
       } else {
         mortalities[event_id] <- FALSE
       }
-    }else {
-      total_kept_catch <- total_kept_catch + 1L
-      #Select the release rate based on clip status
-      fish_rel_rate <- NA_real_
-      if(is_clipped[event_id]) {
-        fish_rel_rate <- clipped_release_rate
-      } else {
-        fish_rel_rate <- unclipped_release_rate
-      }
-
-      if(rel_event[event_id] <= fish_rel_rate) {
-        #The fish was released
+    } else {
+      fish_rel_rate <- 0
+      if(is_legal[event_id] == FALSE) {
+        #If the fish is not legal, then 100% chance of release
         outcomes[event_id] <- Released
-        if(mort_event[event_id] <= release_mort_rate) {
+
+        if(mort_event[event_id] <= nonlegal_release_mort_rate) {
           #The fish died immediately after being released
           mortalities[event_id] <- TRUE
           if(!is.na(cohort_fish_number)) {
@@ -228,26 +178,52 @@ sequencialFisherySim <- function(cohort_df,
           mortalities[event_id] <- FALSE
         }
       } else {
-        #The fish was kept and died
-        outcomes[event_id] <- Kept
-        mortalities[event_id] <- TRUE
-        if(!is.na(cohort_fish_number)) {
-          #Kill the fish in the cohort data frame
-          cohort_df$mortality[cohort_fish_number] <- TRUE
+        #For legal fish, select the release rate based on clip status
+        fish_rel_rate <- ifelse(is_clipped[event_id],
+                                clipped_release_rate,
+                                unclipped_release_rate)
+
+        if(rel_event[event_id] <= fish_rel_rate) {
+          #The fish was released
+          outcomes[event_id] <- Released
+          if(mort_event[event_id] <= legal_release_mort_rate) {
+            #The fish died immediately after being released
+            mortalities[event_id] <- TRUE
+            if(!is.na(cohort_fish_number)) {
+              #Kill the fish in the cohort data frame
+              cohort_df$mortality[cohort_fish_number] <- TRUE
+            }
+          } else {
+            mortalities[event_id] <- FALSE
+          }
+        } else {
+          #The fish was kept and died
+          total_kept_catch <- total_kept_catch + 1L
+          outcomes[event_id] <- Kept
+          mortalities[event_id] <- TRUE
+          if(!is.na(cohort_fish_number)) {
+            #Kill the fish in the cohort data frame
+            cohort_df$mortality[cohort_fish_number] <- TRUE
+          }
         }
       }
     }
   }
 
+  if(!is.na(outcomes[length(outcomes)])) {
+    stop("Ran out of fishing events :-(")
+  }
+
   fishery_df <-
     tibble(event_id = event_seq,
            potential_fish = potential_fish,
-           encouter_event = encouter_event,
+           encounter_event = encounter_event,
            drop_event = drop_event,
            rel_event = rel_event,
            mort_event = mort_event,
            clip_event = clip_event,
            is_clipped  = is_clipped,
+           is_legal = is_legal,
            outcome = outcomes,
            mortality = mortalities,
            fish_number = fish_numbers) |>
@@ -269,7 +245,7 @@ summarizeFishery <- function(fishery_df) {
   total_catch <-
     fishery_df |>
     mutate(is_cohort = if_else(is.na(fish_number), FALSE, TRUE)) |>
-    group_by(outcome, is_cohort, is_clipped) |>
+    group_by(outcome, is_cohort, is_clipped, is_legal) |>
     summarize(mortality = sum(mortality),
               events = n(),
               .groups = "drop")
@@ -277,181 +253,3 @@ summarizeFishery <- function(fishery_df) {
   return(total_catch)
 }
 
-mfaMethod <- function(lambda_pre,
-                      release_mort_rate,
-                      drop_mort_rate,
-                      fishery_summary) {
-  total_catch <-
-    fishery_summary |>
-    filter(outcome %in% c(Kept, Released)) |>
-    group_by(outcome, is_clipped) |>
-    summarize(events = sum(events, na.rm=TRUE), .groups="drop")
-
-
-  kept_mark_cohort <-
-    fishery_summary |>
-    filter(outcome %in% c(Kept),
-           is_clipped == TRUE,
-           is_cohort == TRUE) |>
-    pull(events)
-
-  kept_mark <-
-    total_catch |>
-    filter(outcome %in% c(Kept),
-           is_clipped == TRUE) |>
-    pull(events)
-
-
-  release_mark <-
-    total_catch |>
-    filter(outcome %in% c(Released),
-           is_clipped == TRUE) |>
-    pull(events)
-
-
-  kept_unmark <-
-    total_catch |>
-    filter(outcome %in% c(Kept),
-           is_clipped == FALSE) |>
-    pull(events)
-
-
-  release_unmark <-
-    total_catch |>
-    filter(outcome %in% c(Released),
-           is_clipped == FALSE) |>
-    pull(events)
-
-  release_ratio <- release_mark/ kept_mark
-
-
-  mark_cohort_mortality <- kept_mark_cohort * (1 + release_mort_rate * release_ratio +
-                                                 drop_mort_rate * (1 + release_ratio) )
-
-  unmark_cohort_mortality <- lambda_pre * (kept_mark_cohort + release_ratio * kept_mark_cohort ) *
-    (((kept_unmark + release_mort_rate * release_unmark) / (kept_unmark + release_unmark) ) + drop_mort_rate)
-
-
-  return(tibble(is_clipped = c(TRUE, FALSE),
-                mfa_mortality = c(mark_cohort_mortality, unmark_cohort_mortality)))
-}
-
-
-singleFisheryRun <- function(catch) {
-  cohort_abundance <- 2000L
-  encounter_rate <- 0.1
-  release_mort_rate <- 0.15
-  drop_mort_rate <- 0.05
-  lambda <- 1
-  adclip_rate <- 0.5
-
-  sim_result <-
-    createCohort(cohort_size = cohort_abundance,
-                 adclip_rate = adclip_rate) |>
-    sequencialFisherySim(fishery_catch = catch,
-                         encounter_rate = encounter_rate,
-                         drop_off_rate = drop_mort_rate,
-                         unclipped_release_rate = .9,
-                         clipped_release_rate = .1,
-                         drop_mort_rate = 1.0,
-                         release_mort_rate = release_mort_rate,
-                         fishery_adclip_rate = 0.2)
-
-  fishery_summary <- summarizeFishery(sim_result$fishery_df)
-
-  model_mortality_df <-
-    fishery_summary |>
-    filter(is_cohort == TRUE) |>
-    group_by(is_clipped) |>
-    summarize(model_mortality = sum(mortality), .groups = "drop")
-
-
-  post_cohort <-
-    sim_result$cohort_df |>
-    filter(mortality == FALSE) |>
-    count(is_clipped)
-
-  sim_post_lambda <- post_cohort$n[post_cohort$is_clipped == FALSE] / post_cohort$n[post_cohort$is_clipped == TRUE]
-
-  mfa_post_lambda <- mfaLambda(cohort_abundance,
-                               lambda,
-                               release_mort_rate,
-                               drop_mort_rate,
-                               fishery_summary)
-
-  mid_lambda <- mfaLambda(cohort_abundance,
-                          lambda,
-                          release_mort_rate,
-                          drop_mort_rate,
-                          fishery_summary,
-                          TRUE)
-
-
-  mfa_mortality_df <-
-    mfaMethod(mid_lambda, release_mort_rate, drop_mort_rate, fishery_summary) |>
-    full_join(model_mortality_df, by="is_clipped") |>
-    mutate(catch = catch,
-           bias = (abs(model_mortality) - abs(mfa_mortality)) / abs(model_mortality),
-           sim_post_lambda = sim_post_lambda,
-           mfa_post_lambda = mfa_post_lambda)
-
-  return(mfa_mortality_df)
-}
-
-plan(multisession, workers = 5)
-
-
-bias_estimate <-
-  furrr::future_map_dfr(runif(2000, 1000, 10000),singleFisheryRun, .options = furrr_options(seed = T))
-
-ggplot(bias_estimate, aes(catch, bias, colour = is_clipped)) +
-  geom_point()
-
-lambda_bias <-
-  bias_estimate |>
-  filter(is_clipped == FALSE) |>
-  mutate(lambda_bias = (mfa_post_lambda- sim_post_lambda)/ sim_post_lambda)
-
-
-bias_estimate  |> filter(!is_clipped) |> pull(bias) |> mean()
-
-ggplot(bias_estimate, aes(catch, bias, color = is_clipped)) +
-  geom_point() +
-  geom_smooth(method = "loess")
-
-
-ggplot(lambda_bias, aes(catch, lambda_bias)) +
-  geom_point() +
-  geom_smooth(method = "loess")
-
-#fishery_summary <-
-#  lapply(seq_len(10), function(.) {
-#    sim_result <-
-#      createCohort(cohort_size = 100000L) |>
-#      sequencialFisherySim(fishery_catch = fishery_catch,
-#                           encounter_rate = encounter_rate)
-#    return(summarizeFishery(sim_result$fishery_df))
-#  }) %>%
-#  bind_rows() %>%
-#  group_by(outcome, is_cohort, is_clipped) %>%
-#  summarize(mortality = mean(mortality), .groups="drop")
-#
-
-#
-#cohort_df <- sim_result$cohort_df
-#fishery_df <- sim_result$fishery_df
-#
-#cohort_fishery_df <-
-#  fishery_df |>
-#  select(-mortality) |>
-#  inner_join(cohort_df, by="fish_number") |>
-#  mutate(clipped_cohort = sum(cohort_df$is_clipped == TRUE),
-#         clipped_mort_total = cumsum(if_else(is_clipped == TRUE & mortality, 1, 0)),
-#         unclipped_cohort = sum(cohort_df$is_clipped == FALSE),
-#         unclipped_mort_total = cumsum(if_else(is_clipped == FALSE & mortality, 1, 0)),
-#         lambda = (unclipped_cohort - unclipped_mort_total)/(clipped_cohort - clipped_mort_total))
-#
-#
-#ggplot(cohort_fishery_df, aes(event_id, lambda)) +
-#  geom_point() +
-#  expand_limits(x = 0, y = 1)#
