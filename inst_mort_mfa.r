@@ -18,13 +18,15 @@ instantaneousMfa <- function(kept_mark,
     stop("Only the the unmarked cohort escapement or terminal unmarked cohort can be provided")
   }
 
+  drop_off_ratio <- drop_off_rate / (1-drop_off_rate)
+
   catch_mark <- kept_mark + release_mark
 
   release_mark_cohort <- release_mark * kept_mark_cohort / kept_mark
 
   catch_mark_cohort <- release_mark_cohort + kept_mark_cohort
 
-  drop_mark_cohort <- catch_mark_cohort * drop_off_rate
+  drop_mark_cohort <- catch_mark_cohort * drop_off_ratio
 
   terminal_mark_cohort <- kept_mark_cohort +
     release_mort_rate * release_mark_cohort +
@@ -86,16 +88,19 @@ instMfaNonLegal <- function(kept_mark,
     stop("Only the the unmarked cohort escapement or terminal unmarked cohort can be provided")
   }
 
+  drop_off_ratio <- drop_off_rate / (1-drop_off_rate)
+
   legal_catch_mark <- kept_mark + legal_release_mark
   legal_catch_unmark <- kept_unmark + legal_release_unmark
 
   legal_release_mark_cohort <- legal_release_mark * kept_mark_cohort / kept_mark
-  nonlegal_rel_mark_cohort <-
-    (legal_release_mark  + kept_mark_cohort) * prop_nonlegal / (1-prop_nonlegal)
-
   legal_catch_mark_cohort <- legal_release_mark_cohort + kept_mark_cohort
 
-  drop_mark_cohort <- (legal_catch_mark_cohort + nonlegal_rel_mark_cohort) * drop_off_rate
+  nonlegal_rel_mark_cohort <- legal_catch_mark_cohort * prop_nonlegal / (1-prop_nonlegal)
+
+
+
+  drop_mark_cohort <- (legal_catch_mark_cohort + nonlegal_rel_mark_cohort) * drop_off_ratio
 
   terminal_mark_cohort <- kept_mark_cohort +
     legal_release_mort_rate * legal_release_mark_cohort +
@@ -139,6 +144,7 @@ instMfaNonLegal <- function(kept_mark,
                 post_fishery_unmark_cohort = escapement_unmark_cohort,
                 pre_fishery_unmark_cohort = terminal_unmark_cohort))
 }
+
 
 
 kept_mark <- 100

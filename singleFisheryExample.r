@@ -9,7 +9,7 @@ source("inst_mort_mfa.r")
 
 singleFisheryRun <- function(catch) {
   cohort_abundance <- 10000L
-  cohort_encounter_rate <- 0.5
+  cohort_encounter_rate <- 0.3
   cohort_adclip_rate <- 0.5
   cohort_pnl <- 0.5
 
@@ -17,7 +17,7 @@ singleFisheryRun <- function(catch) {
   drop_off_rate <- 0.05
 
   #background cohorts within the fishery
-  fishery_adclip_rate <- 0.5
+  fishery_adclip_rate <- 0.4
   fishery_pnl <- 0.5
   fishery_unclip_release_rate <- 0.8
   fishery_clip_release_rate <- 0.2
@@ -142,18 +142,45 @@ singleFisheryRun <- function(catch) {
 
   return(sim_result)
 }
-
 singleFisheryRun(1000)
-
 plan(multisession, workers = 5)
 
 sim_result <-
   furrr::future_map_dfr(as.integer(runif(100, 100, 5000)),singleFisheryRun, .options = furrr_options(seed = T)) |>
   mutate(nopnl_mfa_unmark_mort = nopnl_pre_fishery_unmark_cohort - nopnl_post_fishery_unmark_cohort,
          pnl_mfa_unmark_mort = pnl_pre_fishery_unmark_cohort - pnl_post_fishery_unmark_cohort,
-         sim_unmark_mort = sim_pre_fishery_unmark_cohort - sim_post_fishery_unmark_cohort)
+         nopnl_mfa_mark_mort = nopnl_pre_fishery_mark_cohort - nopnl_post_fishery_mark_cohort,
+         pnl_mfa_mark_mort = pnl_pre_fishery_mark_cohort - pnl_post_fishery_mark_cohort,
+         sim_unmark_mort = sim_pre_fishery_unmark_cohort - sim_post_fishery_unmark_cohort,
+         sim_mark_mort = sim_pre_fishery_mark_cohort - sim_post_fishery_mark_cohort)
 
-nonpnl_plot <-
+nonpnl_mark_plot <-
+  ggplot(sim_result, aes(sim_mark_mort,
+                         nopnl_mfa_mark_mort)) +
+  geom_point() +
+  geom_smooth(method='lm', formula= y~x) +
+  geom_abline(intercept = 0, slope = 1) +
+  labs(
+    x = "Simulated Marked Cohort Mortalities",
+    y = "MFA Marked Cohort Mortalities",
+    title = "PNL Not Included"
+  )
+
+
+pnl_mark_plot <-
+  ggplot(sim_result, aes(sim_mark_mort,
+                         pnl_mfa_mark_mort)) +
+  geom_point() +
+  geom_smooth(method='lm', formula= y~x) +
+  geom_abline(intercept = 0, slope = 1) +
+  labs(
+    x = "Simulated Marked Cohort Mortalities",
+    y = "MFA Marked Cohort Mortalities",
+    title = "PNL Included"
+  )
+
+
+nonpnl_unmark_plot <-
   ggplot(sim_result, aes(sim_unmark_mort,
                          nopnl_mfa_unmark_mort)) +
   geom_point() +
@@ -166,7 +193,7 @@ nonpnl_plot <-
   )
 
 
-pnl_plot <-
+pnl_unmark_plot <-
   ggplot(sim_result, aes(sim_unmark_mort,
                          pnl_mfa_unmark_mort)) +
   geom_point() +
@@ -174,14 +201,15 @@ pnl_plot <-
   geom_abline(intercept = 0, slope = 1) +
   labs(
     x = "Simulated Unmarked Cohort Mortalities",
-    y = "MFA Unmarked Cohort Mortalities (With PNL)",
+    y = "MFA Unmarked Cohort Mortalities",
     title = "PNL Included"
   )
 
-plot_grid(nonpnl_plot, pnl_plot, labels = "AUTO")
+plot_grid(nonpnl_mark_plot, pnl_mark_plot,
+          nonpnl_unmark_plot, pnl_unmark_plot, labels = "AUTO")
 
-lm(nopnl_mfa_unmark_mort ~ sim_unmark_mort, sim_result)
-lm(pnl_mfa_unmark_mort ~ sim_unmark_mort, sim_result)
+lm(nopnl_mfa_mark_mort ~ sim_mark_mort, sim_result)
+lm(pnl_mfa_mark_mort ~ sim_mark_mort, sim_result)
 
 
 

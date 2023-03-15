@@ -107,6 +107,7 @@ sequencialFisherySim <- function(cohort_df,
 
   for(event_id in event_seq) {
     if(total_kept_catch  >= fishery_catch) {
+      #Total allowable catch is reach, so no more fishing events to process
       break
     }
 
@@ -114,8 +115,6 @@ sequencialFisherySim <- function(cohort_df,
       #Encountered fish is from the provided cohort
       cohort_fish_number <- selectFish(cohort_df,
                                        potential_fish[event_id])
-
-      #cohort_fish_number <- sample(which(cohort_df$mortality == FALSE), 1)
 
       if(cohort_fish_number > nrow(cohort_df)) {
         stop("Bad fish number")
